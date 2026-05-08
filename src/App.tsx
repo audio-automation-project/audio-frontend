@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  approveDeleteCycle,
   getCoreHealth,
   getSilenceHealth,
   subscribeToAudiobooks,
+  subscribeToCycles,
   subscribeToJobLogs,
   type AudiobookRow,
+  type CycleRow,
   type JobLog,
 } from "./api/client";
 
-type Page = "dashboard" | "jobs" | "library" | "health" | "logs";
+type Page = "dashboard" | "jobs" | "library" | "cycles" | "health" | "logs";
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -16,6 +19,7 @@ export default function App() {
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [jobLogs, setJobLogs] = useState<JobLog[]>([]);
   const [audiobooks, setAudiobooks] = useState<AudiobookRow[]>([]);
+  const [cycles, setCycles] = useState<CycleRow[]>([]);
 
   useEffect(() => {
     const unsub = subscribeToJobLogs(setJobLogs);
@@ -27,9 +31,15 @@ export default function App() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    const unsub = subscribeToCycles(setCycles);
+    return unsub;
+  }, []);
+
   const title = useMemo(() => {
     if (page === "jobs") return "Jobs and Tasks";
     if (page === "library") return "Library (PostgreSQL)";
+    if (page === "cycles") return "Cycles — File Lifecycle";
     if (page === "health") return "Service Health";
     if (page === "logs") return "Logs and Validation";
     return "Platform Dashboard";
@@ -68,6 +78,7 @@ export default function App() {
             <Tab label="Dashboard" active={page === "dashboard"} onClick={() => setPage("dashboard")} />
             <Tab label="Jobs" active={page === "jobs"} onClick={() => setPage("jobs")} />
             <Tab label="Library" active={page === "library"} onClick={() => setPage("library")} />
+            <Tab label="Cycles" active={page === "cycles"} onClick={() => setPage("cycles")} />
             <Tab label="Service Health" active={page === "health"} onClick={() => setPage("health")} />
             <Tab label="Logs" active={page === "logs"} onClick={() => setPage("logs")} />
           </nav>
@@ -86,6 +97,7 @@ export default function App() {
           )}
           {page === "jobs" && <JobLogPanel logs={jobLogs} />}
           {page === "library" && <AudiobookPanel rows={audiobooks} />}
+          {page === "cycles" && <CyclePanel rows={cycles} onRefresh={() => subscribeToCycles(setCycles)} />}
           {page === "logs" && <p>Inspect validation results, execution logs, and error traces.</p>}
           {page === "health" && (
             <div className="space-y-2">
@@ -188,6 +200,92 @@ function JobLogPanel({ logs }: { logs: JobLog[] }) {
           {log.summary && <div className="mt-1 text-xs text-slate-300">{log.summary}</div>}
           {log.errorMessage && (
             <div className="mt-1 text-xs text-red-400">{log.errorMessage}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const LIFECYCLE_COLORS: Record<string, string> = {
+  ACTIVE: "text-slate-300",
+  UPLOADS_CONFIRMED: "text-yellow-400",
+  APPROVED_FOR_DELETE: "text-orange-400",
+  FILES_DELETED: "text-slate-500",
+  FAILED: "text-red-400",
+};
+
+function CyclePanel({ rows, onRefresh }: { rows: CycleRow[]; onRefresh: () => void }) {
+  const [approving, setApproving] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleApprove = async (cycleId: number) => {
+    setApproving(cycleId);
+    setError(null);
+    try {
+      const ok = await approveDeleteCycle(cycleId);
+      if (!ok) {
+        setError(`Cycle ${cycleId}: server rejected approval (check lifecycle state).`);
+      } else {
+        onRefresh();
+      }
+    } catch {
+      setError(`Cycle ${cycleId}: network error.`);
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  if (rows.length === 0) {
+    return (
+      <p className="text-slate-400 text-sm">
+        No cycles found, or the core API is unreachable. Data comes from{" "}
+        <code className="rounded bg-slate-800 px-1">GET /api/v1/cycles</code>.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {error && (
+        <div className="rounded-md border border-red-700 bg-red-900/30 px-3 py-2 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+      {rows.map((cycle) => (
+        <div key={cycle.id} className="rounded-md border border-slate-700 bg-slate-800 p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-medium">Cycle #{cycle.id}</span>
+              {cycle.cycleIdentifier && (
+                <span className="ml-2 text-xs text-slate-400">{cycle.cycleIdentifier}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-medium ${LIFECYCLE_COLORS[cycle.fileLifecycle ?? ""] ?? "text-slate-300"}`}>
+                {cycle.fileLifecycle ?? "—"}
+              </span>
+              {cycle.fileLifecycle === "UPLOADS_CONFIRMED" && (
+                <button
+                  type="button"
+                  disabled={approving === cycle.id}
+                  onClick={() => void handleApprove(cycle.id)}
+                  className="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-500 disabled:opacity-50"
+                >
+                  {approving === cycle.id ? "Approving…" : "Approve file deletion"}
+                </button>
+              )}
+              {cycle.fileLifecycle === "FILES_DELETED" && (
+                <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-400">
+                  Files deleted
+                </span>
+              )}
+            </div>
+          </div>
+          {cycle.targetPlatforms && (
+            <div className="mt-1 text-xs text-slate-500">
+              Platforms: {cycle.targetPlatforms}
+            </div>
           )}
         </div>
       ))}

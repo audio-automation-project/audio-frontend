@@ -125,6 +125,52 @@ export function getCoreHealth(): Promise<string> {
   return healthRequest(CORE_BASE_URL);
 }
 
+/** Matches {@code CycleDto} returned by {@code GET /api/v1/cycles}. */
+export interface CycleRow {
+  id: number;
+  cycleIdentifier?: string;
+  fileLifecycle?: string;
+  targetPlatforms?: string;
+}
+
+/** Polls {@code GET /api/v1/cycles} for lifecycle status. */
+export function subscribeToCycles(
+  onUpdate: (rows: CycleRow[]) => void,
+  pollIntervalMs = 8000
+): () => void {
+  let cancelled = false;
+
+  async function poll() {
+    try {
+      const response = await fetch(`${CORE_BASE_URL}/api/v1/cycles`);
+      if (!response.ok) throw new Error(`cycles ${response.status}`);
+      const data = (await response.json()) as CycleRow[];
+      if (!cancelled) onUpdate(Array.isArray(data) ? data : []);
+    } catch {
+      if (!cancelled) onUpdate([]);
+    }
+  }
+
+  void poll();
+  const timer = window.setInterval(() => void poll(), pollIntervalMs);
+  return () => {
+    cancelled = true;
+    window.clearInterval(timer);
+  };
+}
+
+/**
+ * Calls {@code POST /api/v1/cycles/{cycleId}/approve-delete}.
+ * Returns true on 204 No Content, false otherwise.
+ */
+export async function approveDeleteCycle(cycleId: number): Promise<boolean> {
+  const response = await fetch(
+    `${CORE_BASE_URL}/api/v1/cycles/${cycleId}/approve-delete`,
+    { method: "POST" }
+  );
+  return response.status === 204;
+}
+
 export function getSilenceHealth(): Promise<string> {
   return healthRequest(SILENCE_BASE_URL);
 }
