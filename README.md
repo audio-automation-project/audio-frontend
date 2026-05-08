@@ -24,4 +24,8 @@ The bot can expose **async** concatenate jobs when Postgres is configured:
 
 Legacy **`POST …/api/audio/concatenate`** remains synchronous.
 
+### Job log panel (dashboard Jobs page)
+
+`GET ${VITE_CORE_API_URL}/api/v1/job-logs?limit=50` returns recent rows from PostgreSQL `job_logs`. The SPA polls this endpoint; it does not read Firestore or the database directly.
+
 Ensure the frontend origin is allowed by the bot’s **`CORS_ALLOWED_ORIGINS`** in production.
